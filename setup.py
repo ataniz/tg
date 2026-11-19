@@ -20,7 +20,7 @@ setup(
         "Programming Language :: Python :: 3.9",
     ],
     packages=["tg"],
-    entry_points={"console_scripts": ["tg = tg.__main__:main"]},
+    entry_points={"console_scripts": ["tg = tg.cli:entry"]},
     python_requires=">=3.9",
     install_requires=["python-telegram==0.15.0"],
 )

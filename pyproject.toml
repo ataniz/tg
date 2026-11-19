@@ -25,10 +25,10 @@ mypy = "^1.15.0"
 ruff = "^0.11.5"
 
 [project.scripts]
-tg = "tg.__main__:main"
+tg = "tg.cli:entry"
 
 [tool.poetry.scripts]
-tg = "tg.__main__:main"
+tg = "tg.cli:entry"
 
 [build-system]
 requires = ["poetry-core>=1.0.0,<2.0.0"]
