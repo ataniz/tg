@@ -161,7 +161,15 @@ def export(tg: Any, out: str, max_members: int, skip: List[str], page_budget: in
     def write(obj: Dict[str, Any]) -> None:
         log.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
+    def save() -> None:
+        log.flush()
+        json.dump(state, open(state_path + ".tmp", "w"))
+        os.replace(state_path + ".tmp", state_path)
+
     try:
+        # First every chat's new messages, so recent ones are never stuck behind a backfill: a chat
+        # seen before is read back to its newest known message, a new one gets its latest page.
+        kept = []
         for chat_id in dict.fromkeys(ids):
             meta = describe(tg, users, call(tg, "getChat", chat_id=chat_id))
             if meta["kind"] == "channel" or meta["bot"] or str(chat_id) in skip or meta["title"] in skip or (meta["memberCount"] or 0) > max_members:
@@ -173,26 +181,31 @@ def export(tg: Any, out: str, max_members: int, skip: List[str], page_budget: in
             if st["meta"] != meta:
                 write(meta)
                 st["meta"] = meta
-            fresh, _ = pages(tg, chat_id, 0, st["newest"], budget)
+            fresh, _ = pages(tg, chat_id, 0, st["newest"], [50 if st["newest"] else 1])
             for m in reversed(fresh):
                 write(record(users, chat_id, m))
             if fresh:
                 st["newest"] = max(st["newest"], fresh[0]["id"])
                 st["oldest"] = st["oldest"] or fresh[-1]["id"]
-            if not st["complete"] and st["oldest"]:
-                older, ended = pages(tg, chat_id, st["oldest"], 0, budget)
-                for m in reversed(older):
-                    write(record(users, chat_id, m))
-                if older:
-                    st["oldest"] = older[-1]["id"]
-                st["complete"] = ended
-            elif not st["oldest"] and budget[0] > 0:
+            elif not st["oldest"]:
                 st["complete"] = True
             report["messages"] += len(fresh)
-            report["backfilling"] += 0 if st["complete"] else 1
-            log.flush()
-            json.dump(state, open(state_path + ".tmp", "w"))
-            os.replace(state_path + ".tmp", state_path)
+            kept.append(chat_id)
+            save()
+        # Then older history, chat by chat, as far as the page budget goes.
+        for chat_id in kept:
+            st = state["chats"][str(chat_id)]
+            if st["complete"] or budget[0] <= 0:
+                continue
+            older, ended = pages(tg, chat_id, st["oldest"], 0, budget)
+            for m in reversed(older):
+                write(record(users, chat_id, m))
+            if older:
+                st["oldest"] = older[-1]["id"]
+            st["complete"] = ended
+            report["messages"] += len(older)
+            save()
+        report["backfilling"] = sum(1 for chat_id in kept if not state["chats"][str(chat_id)]["complete"])
     finally:
         log.close()
     return report
