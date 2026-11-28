@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
 CONFIG_FILE = os.path.expanduser("~/.config/tg/conf.py")
-COMMANDS = ("login", "me", "chats", "history", "send", "export")
+COMMANDS = ("login", "me", "chats", "history", "send", "export", "download")
 
 
 def client() -> Any:
@@ -218,6 +218,25 @@ def export(tg: Any, out: str, max_members: int, skip: List[str], page_budget: in
     return report
 
 
+# The file a message carries, in the order a transcriber wants them.
+MEDIA_KEYS = (("voice_note", "voice"), ("audio", "audio"), ("video_note", "video"), ("document", "document"), ("video", "video"))
+
+
+def download(tg: Any, chat_id: int, message_id: int, out: str) -> Dict[str, Any]:
+    msg = call(tg, "getMessage", chat_id=chat_id, message_id=message_id)
+    content = msg.get("content", {})
+    for outer, inner in MEDIA_KEYS:
+        file = content.get(outer, {}).get(inner)
+        if file:
+            done = call(tg, "downloadFile", file_id=file["id"], priority=1, offset=0, limit=0, synchronous=True)
+            path = done["local"]["path"]
+            os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
+            with open(path, "rb") as source, open(out, "wb") as target:
+                target.write(source.read())
+            return {"downloaded": True, "path": out, "kind": outer, "bytes": os.path.getsize(out)}
+    sys.exit(f"download: message {message_id} carries no file")
+
+
 def emit(obj: Any) -> None:
     print(json.dumps(obj, ensure_ascii=False))
 
@@ -241,6 +260,10 @@ def main(argv: list) -> None:
     e.add_argument("--max-members", type=int, default=50)
     e.add_argument("--skip", action="append", default=[], help="chat id or title to leave out (repeat)")
     e.add_argument("--pages", type=int, default=300, help="most history pages (100 messages each) to fetch in this run")
+    d = sub.add_parser("download", help="Download a message's voice note, audio or file to a path")
+    d.add_argument("chat_id", type=int)
+    d.add_argument("message_id", type=int)
+    d.add_argument("out")
     args = p.parse_args(argv)
 
     if args.cmd != "login" and not os.path.isfile(CONFIG_FILE):
@@ -275,6 +298,8 @@ def main(argv: list) -> None:
             emit({"sent": True, "to": target, "id": sent.update["id"]})
         elif args.cmd == "export":
             emit(export(tg, args.out, args.max_members, args.skip, args.pages))
+        elif args.cmd == "download":
+            emit(download(tg, args.chat_id, args.message_id, args.out))
     finally:
         tg.stop()
 
