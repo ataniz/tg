@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -30,11 +31,17 @@ def client() -> Any:
 
 
 def call(tg: Any, method: str, **params: Any) -> Dict[str, Any]:
-    result = tg.call_method(method, params=params)
-    result.wait()
-    if result.error:
-        sys.exit(f"{method}: {result.error_info}")
-    return result.update
+    for _ in range(5):
+        result = tg.call_method(method, params=params)
+        result.wait()
+        if not result.error:
+            return result.update
+        # Telegram slows bulk reads down with 429 "retry after N"; wait it out rather than fail.
+        wait = re.search(r"retry after (\d+)", str(result.error_info.get("message", "")))
+        if result.error_info.get("code") != 429 or not wait:
+            break
+        time.sleep(int(wait.group(1)) + 1)
+    sys.exit(f"{method}: {result.error_info}")
 
 
 def text_of(msg: Dict[str, Any]) -> str:
